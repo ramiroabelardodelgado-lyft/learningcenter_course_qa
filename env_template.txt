@@ -1,0 +1,33 @@
+# ═══════════════════════════════════════════════════════════
+# Language QA Pipeline — Environment Variables
+# ═══════════════════════════════════════════════════════════
+# Copy to $HOME/studio/.env on the SageMaker instance
+# NEVER commit this file to git
+# Back up to S3: aws s3 cp .env s3://lyft-lyftlearn-production-iad/course-qa/config/.env
+# ═══════════════════════════════════════════════════════════
+
+# ── Contentful CMA ────────────────────────────────────────
+CONTENTFUL_SPACE_ID=kdr36sxfa9m3
+CONTENTFUL_CMA_TOKEN=REPLACE_WITH_YOUR_TOKEN
+CONTENTFUL_ENVIRONMENT_ID=master
+
+# ── GitHub (job queue bridge) ─────────────────────────────
+GITHUB_TOKEN=REPLACE_WITH_NEW_TOKEN
+GITHUB_API=https://api.github.com
+GITHUB_REPO=ramiroabelardodelgado-lyft/lyftlearn-qa-jobs
+
+# ── Slack Workflow Webhook (results callback) ─────────────
+WORKATO_CALLBACK_URL=https://hooks.slack.com/triggers/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
+
+# ── S3 (defaults — usually don't need to set) ────────────
+# S3_BUCKET=lyft-lyftlearn-production-iad
+# S3_PENDING_PREFIX=course-qa/pending/
+# S3_COMPLETE_PREFIX=course-qa/complete/
+# S3_CSV_PREFIX=course-qa/csvs/
+
+# ── Google Sheets (job queue — Workato writes here) ───────
+# GOOGLE_SHEET_ID=1dVd4azBziNzDMq6IggAYyS3RXvM81qTeevqaqLAboGQ
+
+# ── DO NOT SET THESE ON THE INSTANCE ──────────────────────
+# AWS_PROFILE — breaks container credentials (Roadblock #7)
+# The instance gets AWS creds automatically from its IAM role
