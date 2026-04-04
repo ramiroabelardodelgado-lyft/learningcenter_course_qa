@@ -202,8 +202,10 @@ def run(params=None):
         full_path   = str(out_dir / f"{job_id}_qa_full.csv")
         issues_path = str(out_dir / f"{job_id}_qa_issues.csv")
 
-        generate_csv(qa_results, full_path)
-        generate_csv(qa_results, issues_path, issues_only=True)
+        generate_csv(qa_results, full_path, space_id=space_id, env_id=env_id)
+        generate_csv(
+            qa_results, issues_path, space_id=space_id, env_id=env_id, issues_only=True
+        )
 
         print(f"  ✅ Full:   {full_path}")
         print(f"  ✅ Issues: {issues_path}")
@@ -211,7 +213,17 @@ def run(params=None):
         callback.update({
             "status":          "success",
             "locales_checked": [r["locale"] for r in qa_results],
+            # Per-locale counts (compact) — kept for any consumers expecting this shape
             "summary":         {r["locale"]: r["summary"] for r in qa_results},
+            # github_bridge.build_summary_from_result expects this nested shape
+            "locales":         {
+                r["locale"]: {
+                    "course_name":  r.get("course_name", course_name),
+                    "summary":      r["summary"],
+                    "total_fields": r.get("total_fields", 0),
+                }
+                for r in qa_results
+            },
             "csv_issues_path": issues_path,
             "csv_full_path":   full_path,
         })

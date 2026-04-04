@@ -361,7 +361,20 @@ def build_summary_from_result(result):
         return summary
 
     # Fallback: try to build from locale results
-    locales = result.get("locales", {})
+    locales = result.get("locales") or {}
+    # Older runner payloads: summary = { locale: { WRONG_LANGUAGE: n, ... } } without locales{}
+    if not locales and isinstance(result.get("summary"), dict):
+        flat = result["summary"]
+        top_course = result.get("course_name") or "?"
+        if flat and all(isinstance(v, dict) and "WRONG_LANGUAGE" in v for v in flat.values()):
+            locales = {
+                loc: {
+                    "course_name": top_course,
+                    "summary": data,
+                    "total_fields": "-",  # not present on legacy runner payloads
+                }
+                for loc, data in flat.items()
+            }
     if not locales:
         return f"✅ QA complete for job `{result.get('job_id', '?')}`"
 
