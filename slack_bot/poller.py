@@ -12,13 +12,6 @@ import traceback
 from pathlib import Path
 from datetime import datetime, timezone
 
-# sys.path patch — packages live inside studio/ (Roadblock #9)
-_home   = Path.home()
-_studio = _home / "studio"
-for _p in [_studio / "persistent-packages", _studio]:
-    if _p.exists() and str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
-
 import boto3
 
 BUCKET   = "lyft-lyftlearn-production-iad"

@@ -16,17 +16,8 @@ import traceback
 from pathlib import Path
 from datetime import datetime, timezone
 
-
-# ── patch sys.path ────────────────────────
-# All packages and scripts live inside studio/ for portability.
-# No ~/.bashrc dependency — this file handles its own imports. (Roadblock #9)
-_home   = Path.home()                         # Path.home() not ~ (Roadblock #8)
+_home   = Path.home()
 _studio = _home / "studio"
-
-for _p in [_studio / "persistent-packages", _studio]:
-    if _p.exists() and str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _load_env():
@@ -103,7 +94,10 @@ def run(params=None):
     languages        = _get(params, "languages",           "LANGUAGES",            "all")
     qa_locale        = _get(params, "qa_locale",           "QA_LOCALE")            or None
     qa_skip_en       = _get(params, "qa_skip_en",          "QA_SKIP_EN",           "false").lower() == "true"
-    callback_url     = _get(params, "workato_callback_url","WORKATO_CALLBACK_URL", "")
+    # Results returned via GitHub Issues → github_bridge.py → Workato.
+    # Direct Workato callback from runner disabled to avoid double-posting.
+    # callback_url = _get(params, "workato_callback_url", "WORKATO_CALLBACK_URL", "")
+    callback_url = ""
     slack_channel_id = _get(params, "slack_channel_id",    "SLACK_CHANNEL_ID",     "")
     slack_thread_ts  = _get(params, "slack_thread_ts",     "SLACK_THREAD_TS",      "")
 
@@ -130,6 +124,7 @@ def run(params=None):
         "slack_thread_ts":  slack_thread_ts,
         "locales_checked":  [],
         "summary":          {},
+        "locales":          {},
         "csv_issues_path":  None,
         "csv_full_path":    None,
         "duration_seconds": None,

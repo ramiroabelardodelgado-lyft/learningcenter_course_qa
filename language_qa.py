@@ -48,7 +48,10 @@ def get_llm():
     """Initialize Claude via Lyft aiproxy."""
     try:
         import lyft_llm.integrations.langchain as llc
-        chat = llc.make_llm(model_id="us.anthropic.claude-3-5-sonnet-20241022-v2:0")
+        chat = llc.make_llm(
+            model_id="us.anthropic.claude-sonnet-4-6",
+            model_kwargs={"temperature": 0}
+        )
         return chat
     except ImportError:
         print("❌ lyft_llm not available. This script must run on LyftLearn.")
