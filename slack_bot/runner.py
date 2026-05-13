@@ -16,9 +16,6 @@ import traceback
 from pathlib import Path
 from datetime import datetime, timezone
 
-_home   = Path.home()
-_studio = _home / "studio"
-
 
 def _load_env():
     """
@@ -94,8 +91,7 @@ def run(params=None):
     languages        = _get(params, "languages",           "LANGUAGES",            "all")
     qa_locale        = _get(params, "qa_locale",           "QA_LOCALE")            or None
     qa_skip_en       = _get(params, "qa_skip_en",          "QA_SKIP_EN",           "false").lower() == "true"
-    # Results returned via GitHub Issues → github_bridge.py → Workato.
-    # Direct Workato callback from runner disabled to avoid double-posting.
+    # Results returned via GitHub — Workato callback disabled for now.
     # callback_url = _get(params, "workato_callback_url", "WORKATO_CALLBACK_URL", "")
     callback_url = ""
     slack_channel_id = _get(params, "slack_channel_id",    "SLACK_CHANNEL_ID",     "")
@@ -208,14 +204,12 @@ def run(params=None):
         callback.update({
             "status":          "success",
             "locales_checked": [r["locale"] for r in qa_results],
-            # Per-locale counts (compact) — kept for any consumers expecting this shape
             "summary":         {r["locale"]: r["summary"] for r in qa_results},
-            # github_bridge.build_summary_from_result expects this nested shape
             "locales":         {
                 r["locale"]: {
-                    "course_name":  r.get("course_name", course_name),
-                    "summary":      r["summary"],
-                    "total_fields": r.get("total_fields", 0),
+                    "course_name":   r["course_name"],
+                    "total_fields":  r["total_fields"],
+                    "summary":       r["summary"],
                 }
                 for r in qa_results
             },

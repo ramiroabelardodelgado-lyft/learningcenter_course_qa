@@ -30,7 +30,7 @@ Flow:
     GitHub Issue: comment summary + upload CSV + close issue
          │
          ▼
-    Workato webhook: summary + CSV links → Slack thread
+    Slack webhook: summary + CSV links → #learning-center-qa
 
 Usage (on instance):
     source ~/.bashrc
@@ -41,7 +41,7 @@ Environment variables (add to ~/studio/.env):
     GITHUB_TOKEN=ghp_your_token
     GITHUB_API=https://api.github.com
     GITHUB_REPO=ramiroabelardodelgado-lyft/lyftlearn-qa-jobs
-    WORKATO_CALLBACK_URL=https://your-workato-webhook-url  (optional)
+    WORKATO_CALLBACK_URL=https://hooks.slack.com/triggers/...  (Slack Workflow webhook)
 
     # Existing (already set):
     # AWS credentials come from container role — no config needed
@@ -95,7 +95,7 @@ POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "30"))
 # Maps job_id → github_issue_number
 active_jobs = {}
 
-# Track original job params (for Workato callback with Slack IDs)
+# Track original job params (for callback with Slack IDs)
 # Maps job_id → job params dict
 job_params = {}
 
@@ -212,7 +212,7 @@ def poll_github_pending():
     For each: parse job params, write to S3 pending, update labels.
     """
     resp = gh_get(repo_path("issues"), params={
-        "labels": "pending",
+        # "labels": "pending",
         "state": "open",
         "per_page": 5,
     })
@@ -233,6 +233,11 @@ def poll_github_pending():
         body = issue.get("body") or ""
 
         log(f"Found pending issue #{issue_number}: {title}")
+
+        # Skip issues already being processed (prevents double-run)
+        if issue_number in active_jobs.values():
+            log(f"  ⏭️  Issue #{issue_number} already in progress — skipping")
+            continue
 
         # Parse job params
         job = parse_job_from_body(body)
@@ -278,14 +283,14 @@ def poll_github_pending():
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# OUTBOUND: S3 complete → GitHub Issue close + CSV upload + Workato
+# OUTBOUND: S3 complete → GitHub Issue close + CSV upload + Slack
 # ═══════════════════════════════════════════════════════════════════════
 
 def poll_s3_complete():
     """
     Check S3 course-qa/complete/ for finished jobs.
     For each: read result, update GitHub issue, upload CSV, close issue,
-    and POST callback to Workato.
+    and POST to Slack webhook.
     """
     s3 = get_s3()
     keys = s3_list_keys(s3, S3_COMPLETE_PREFIX)
@@ -320,7 +325,7 @@ def poll_s3_complete():
             if status == "error":
                 error_msg = result.get("error", "Unknown error")
                 fail_issue(issue_number, f"Pipeline error:\n```\n{error_msg}\n```")
-                post_workato_callback(job_id, "error", error_msg, [])
+                post_slack_callback(job_id, "error", f"❌ Pipeline failed: {error_msg}", [])
             else:
                 # Build summary comment (summary field may be a dict, not a string)
                 summary = result.get("summary", "")
@@ -340,8 +345,8 @@ def poll_s3_complete():
                 # Post comment + close issue
                 complete_issue(issue_number, comment_body)
 
-                # POST to Workato so it can forward to Slack
-                post_workato_callback(job_id, "complete", summary, csv_links)
+                # POST to Slack webhook
+                post_slack_callback(job_id, "complete", summary, csv_links)
 
             # Clean up: remove from S3 complete/ and active_jobs
             s3_delete(s3, key)
@@ -353,61 +358,46 @@ def poll_s3_complete():
             log(f"  ❌ Error processing result for issue #{issue_number}: {e}")
             traceback.print_exc()
 
-
 def build_summary_from_result(result):
     """Build a markdown summary table from the result JSON."""
-    summary = result.get("summary_text", "")
-    if isinstance(summary, str) and summary:
-        return summary
+    # The S3 complete JSON has summary as a dict of locale → counts
+    # e.g. {"summary": {"es": {"WRONG_LANGUAGE": 0, ...}, "pt": {...}}}
+    summary_data = result.get("summary", {})
+    course_name = result.get("course_name", "?")
 
-    # Fallback: try to build from locale results
-    locales = result.get("locales") or {}
-    # Older runner payloads: summary = { locale: { WRONG_LANGUAGE: n, ... } } without locales{}
-    if not locales and isinstance(result.get("summary"), dict):
-        flat = result["summary"]
-        top_course = result.get("course_name") or "?"
-        if flat and all(isinstance(v, dict) and "WRONG_LANGUAGE" in v for v in flat.values()):
-            locales = {
-                loc: {
-                    "course_name": top_course,
-                    "summary": data,
-                    "total_fields": "-",  # not present on legacy runner payloads
-                }
-                for loc, data in flat.items()
-            }
-    if not locales:
-        return f"✅ QA complete for job `{result.get('job_id', '?')}`"
+    # If summary is a string, return it directly
+    if isinstance(summary_data, str) and summary_data:
+        return summary_data
+
+    # If summary is not a dict of locales, return simple message
+    if not isinstance(summary_data, dict) or not summary_data:
+        return f"✅ QA complete for job `{result.get('job_id', '?')}` — {course_name}"
 
     lines = []
-    course_name = ""
     total_critical = 0
 
-    lines.append("| Locale | Fields | ❌ Wrong | ⚠️ Escape | 🔄 Untrans | Status |")
-    lines.append("|--------|--------|----------|-----------|------------|--------|")
+    lines.append("| Locale | ❌ Wrong | ⚠️ Escape | 🔄 Untrans | Status |")
+    lines.append("|--------|----------|-----------|------------|--------|")
 
-    for locale, data in locales.items():
-        if not course_name:
-            course_name = data.get("course_name", "?")
-        s = data.get("summary", {})
-        if not isinstance(s, dict):
-            s = {}
-        wrong = s.get("WRONG_LANGUAGE", 0)
-        escape = s.get("ESCAPE_CHARS", 0)
-        untrans = s.get("UNTRANSLATED", 0)
-        total = data.get("total_fields", 0)
+    for locale, counts in summary_data.items():
+        if not isinstance(counts, dict):
+            continue
+        wrong = counts.get("WRONG_LANGUAGE", 0)
+        escape = counts.get("ESCAPE_CHARS", 0)
+        untrans = counts.get("UNTRANSLATED", 0)
         critical = wrong + untrans
         total_critical += critical
         status = "✅" if critical == 0 else "❌"
         if critical == 0 and escape > 0:
             status = "⚠️"
-        lines.append(f"| {locale} | {total} | {wrong} | {escape} | {untrans} | {status} |")
+        lines.append(f"| {locale} | {wrong} | {escape} | {untrans} | {status} |")
 
-    header = f"## {'✅' if total_critical == 0 else '❌'} QA Complete: {course_name}\n\n"
+    emoji = "✅" if total_critical == 0 else "❌"
+    header = f"{emoji} *QA Complete: {course_name}*\n\n"
     table = "\n".join(lines)
-    footer = f"\n\n**Critical issues:** {total_critical}"
+    footer = f"\n\n*Critical issues:* {total_critical}"
 
     return header + table + footer
-
 
 def upload_csvs_to_github(s3, job_id):
     """
@@ -466,41 +456,50 @@ def upload_csvs_to_github(s3, job_id):
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Workato Webhook Callback
+# Slack Webhook Callback
 # ═══════════════════════════════════════════════════════════════════════
 
-def post_workato_callback(job_id, status, summary, csv_links):
+def post_slack_callback(job_id, status, summary, csv_links):
     """
-    POST results to Workato webhook so it can forward to Slack.
-    Includes Slack channel/thread IDs from original job params.
+    POST results to Slack Workflow webhook.
+    Sends flat key-value pairs matching the Slack Workflow variables:
+      summary, course_name, csv_url, github_issue, status
     """
     if not WORKATO_CALLBACK_URL:
-        log(f"  ℹ️  No WORKATO_CALLBACK_URL — skipping webhook callback")
+        log(f"  ℹ️  No WORKATO_CALLBACK_URL — skipping Slack callback")
         return
 
-    # Get original job params for Slack routing
+    # Get original job params
     original = job_params.get(job_id, {})
+    issue_number = active_jobs.get(job_id, "")
 
+    # Pick the issues CSV URL (most useful for the team)
+    # Fall back to full CSV, then empty string
+    csv_url = ""
+    for name, url in csv_links:
+        if "issues" in name.lower():
+            csv_url = url
+            break
+    if not csv_url and csv_links:
+        csv_url = csv_links[0][1]
+
+    # Flat payload — matches Slack Workflow webhook variables exactly
     payload = {
-        "job_id": job_id,
-        "status": status,
         "summary": summary,
-        "csv_links": [{"name": name, "url": url} for name, url in csv_links],
-        "slack_channel_id": original.get("slack_channel_id", ""),
-        "slack_thread_ts": original.get("slack_thread_ts", ""),
-        "course_id": original.get("course_id", ""),
-        "course_name": original.get("course_name", ""),
-        "github_issue": f"https://github.com/{GITHUB_REPO}/issues/{active_jobs.get(job_id, '')}",
+        "course_name": original.get("course_name", "") or original.get("course_id", "unknown"),
+        "csv_url": csv_url,
+        "github_issue": f"https://github.com/{GITHUB_REPO}/issues/{issue_number}",
+        "status": status,
     }
 
     try:
         resp = requests.post(WORKATO_CALLBACK_URL, json=payload, timeout=15)
         if resp.status_code in (200, 201, 202):
-            log(f"  📨 Workato callback sent (status: {resp.status_code})")
+            log(f"  📨 Slack callback sent (status: {resp.status_code})")
         else:
-            log(f"  ⚠️  Workato callback failed: {resp.status_code} — {resp.text[:200]}")
+            log(f"  ⚠️  Slack callback failed: {resp.status_code} — {resp.text[:200]}")
     except Exception as e:
-        log(f"  ⚠️  Workato callback error: {e}")
+        log(f"  ⚠️  Slack callback error: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -564,9 +563,9 @@ def validate_config():
     except Exception as e:
         errors.append(f"S3 connection failed: {e}")
 
-    # Workato callback (optional)
+    # Slack callback (optional)
     if WORKATO_CALLBACK_URL:
-        log(f"✅ Workato callback: {WORKATO_CALLBACK_URL[:50]}...")
+        log(f"✅ Slack callback: {WORKATO_CALLBACK_URL[:60]}...")
     else:
         log(f"ℹ️  No WORKATO_CALLBACK_URL — results will only go to GitHub")
 

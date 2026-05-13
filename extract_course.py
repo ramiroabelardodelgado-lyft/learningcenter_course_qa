@@ -2,7 +2,7 @@
 """
 Lyft Tutorial Content Extractor (Self-Contained)
 ==================================================
-Extracts course content from Contentful CMA based on the complete data model:
+Extracts course content from Contentful CMA based on the data model:
 
     courseContainer
       └── course (via defaultCourse or courseVariants[])

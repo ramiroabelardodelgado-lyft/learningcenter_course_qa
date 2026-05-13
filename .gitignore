@@ -3,3 +3,12 @@
 .env.*
 !.env.example
 node_modules/
+output/
+__pycache__/
+*.pyc
+*.log
+.ipynb_checkpoints/
+*.ipynb
+test_migration/
+MIGRATION_COMPLETE.md
+TASK-001-*.md
