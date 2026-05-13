@@ -98,7 +98,7 @@ def run(params=None):
     slack_thread_ts  = _get(params, "slack_thread_ts",     "SLACK_THREAD_TS",      "")
 
     # Output to EFS via symlink — use Path.home() not ~ (Roadblocks #8, #11)
-    output_base = _studio / "output"
+    output_base = Path.home() / "studio" / "output"
 
     print(f"\n{'='*60}")
     print(f"  Course QA Job: {job_id}")
