@@ -23,7 +23,7 @@ def _load_env():
     Explicitly skips AWS_PROFILE — it breaks container credentials.
     (Roadblock #7)
     """
-    env_path = _studio / ".env"
+    env_path = Path.home() / "studio" / ".env"
     if not env_path.exists():
         return
     try:
