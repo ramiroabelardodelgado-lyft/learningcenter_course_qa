@@ -427,7 +427,7 @@ async def next_click(page) -> str:
 
     Returns: "lesson" | "next" | "last" | "done" | "error"
     """
-    # Check for error page first (avoid infinite retry loops)
+    # Check for error page first and try to retry
     error_indicators = [
         'text=/something went wrong/i',
         'text=/oops/i',
@@ -440,8 +440,38 @@ async def next_click(page) -> str:
     for indicator in error_indicators:
         error_elem = page.locator(indicator)
         if await error_elem.count() > 0:
-            print(f"    ⚠️  Error page detected ({indicator}) - stopping navigation")
-            return "error"
+            print(f"    ⚠️  Error page detected ({indicator}) - attempting retry...")
+
+            # Wait 1 second then look for retry button
+            await page.wait_for_timeout(1000)
+
+            # Try to find and click retry button
+            retry_selectors = [
+                'button:has-text("Retry")',
+                'button:has-text("Try again")',
+                'button:has-text("Reintentar")',  # Spanish
+                'button:has-text("Réessayer")',  # French
+                'button:has-text("Tentar novamente")',  # Portuguese
+                'button[data-testid="core-ui-button"]',
+            ]
+
+            retry_clicked = False
+            for selector in retry_selectors:
+                retry_btn = page.locator(selector)
+                if await retry_btn.count() > 0:
+                    try:
+                        if await retry_btn.first.is_visible():
+                            await retry_btn.first.click()
+                            print(f"    ✓ Clicked retry button: {selector}")
+                            retry_clicked = True
+                            await page.wait_for_timeout(2000)
+                            return "retry"
+                    except:
+                        continue
+
+            if not retry_clicked:
+                print(f"    ❌ Could not find retry button - stopping")
+                return "error"
 
     # Tier 1: lesson name tab — advances to next lesson
     lesson_tabs = page.locator('p[data-testid="lesson-name"]')
@@ -654,6 +684,16 @@ async def capture_locale(
         if action == "error":
             print(f"    [{locale}] ❌ error page encountered, stopping ({page_num} pages)")
             break
+
+        if action == "retry":
+            # Retry button was clicked, continue to next iteration
+            print(f"    [{locale}] 🔄 retrying after error...")
+            try:
+                await page.wait_for_load_state("networkidle", timeout=8_000)
+            except Exception:
+                pass
+            await page.wait_for_timeout(PAGE_SETTLE_MS)
+            continue
 
         try:
             await page.wait_for_load_state("networkidle", timeout=8_000)
