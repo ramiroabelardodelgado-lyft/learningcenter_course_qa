@@ -262,33 +262,93 @@ async def handle_quiz(page, page_num: int, course_structure: dict, quiz_cache: d
         # Check if we have a cached answer for this page
         cached_answer_idx = quiz_cache.get(page_num)
 
-        # Try different answer selectors
-        answer_selectors = [
-            '[role="radio"]',
-            'button[role="radio"]',
-            'div[role="radio"]',
-            '[data-testid^="answer"]',
-        ]
+        # Look for the "Show me the answer" button - if present, answers are above it
+        # The quiz has blue card divs that are clickable answers
+        # Strategy: find all visible clickable elements between the question and "Show me the answer"
 
         answer_clicked = False
-        for selector in answer_selectors:
-            options = page.locator(selector)
-            count = await options.count()
 
-            if count > 0:
-                # If we have cached answer, use it; otherwise click first
-                answer_idx = cached_answer_idx if cached_answer_idx is not None and cached_answer_idx < count else 0
+        # First try: look for clickable divs/buttons near the question text
+        # The screenshot shows these are large blue rounded rectangles
+        question_area = page.locator('text=/what is the benefit|you had a small accident/i')
+        if await question_area.count() > 0:
+            # Get all clickable elements (divs/buttons with cursor pointer or that are clickable)
+            # Find elements that look like answer cards (contain text, are sizeable)
+            possible_answers = []
 
-                await options.nth(answer_idx).click()
-                print(f"    ✓ Clicked answer {answer_idx} using selector: {selector}")
+            # Try to find answer cards by looking for elements with specific styling
+            # The blue cards likely have cursor:pointer or are within a clickable container
+            all_divs = page.locator('div').all()
 
-                # Cache the answer index for other locales
-                if page_num not in quiz_cache:
-                    quiz_cache[page_num] = answer_idx
+            # Simpler approach: just click below the question text
+            # Find the first few large clickable areas after the question
+            # Use JavaScript to find clickable elements
+            js_result = await page.evaluate('''() => {
+                const elements = Array.from(document.querySelectorAll('div, button'));
+                const clickable = elements.filter(el => {
+                    const style = window.getComputedStyle(el);
+                    const rect = el.getBoundingClientRect();
+                    return (
+                        style.cursor === 'pointer' &&
+                        rect.height > 50 &&
+                        rect.width > 200 &&
+                        el.textContent.length > 10
+                    );
+                });
+                return clickable.length;
+            }''')
 
-                answer_clicked = True
-                await page.wait_for_timeout(500)
-                break
+            if js_result > 0:
+                # Found clickable answer-like elements
+                options = page.locator('div, button').filter(has=page.locator('text=/./'))
+                # Filter for elements with pointer cursor
+                clickable_options = await page.evaluate('''() => {
+                    const elements = Array.from(document.querySelectorAll('div, button'));
+                    return elements
+                        .filter(el => {
+                            const style = window.getComputedStyle(el);
+                            const rect = el.getBoundingClientRect();
+                            return (
+                                style.cursor === 'pointer' &&
+                                rect.height > 50 &&
+                                rect.width > 200 &&
+                                el.textContent.trim().length > 10 &&
+                                !el.textContent.includes('Show me the answer') &&
+                                !el.textContent.includes('Knowledge Check')
+                            );
+                        })
+                        .map(el => Array.from(document.querySelectorAll('*')).indexOf(el));
+                }''')
+
+                if len(clickable_options) > 0:
+                    answer_idx = cached_answer_idx if cached_answer_idx is not None and cached_answer_idx < len(clickable_options) else 0
+                    # Click using JavaScript
+                    await page.evaluate(f'''() => {{
+                        const elements = Array.from(document.querySelectorAll('div, button'));
+                        const clickable = elements.filter(el => {{
+                            const style = window.getComputedStyle(el);
+                            const rect = el.getBoundingClientRect();
+                            return (
+                                style.cursor === 'pointer' &&
+                                rect.height > 50 &&
+                                rect.width > 200 &&
+                                el.textContent.trim().length > 10 &&
+                                !el.textContent.includes('Show me the answer') &&
+                                !el.textContent.includes('Knowledge Check')
+                            );
+                        }});
+                        if (clickable[{answer_idx}]) {{
+                            clickable[{answer_idx}].click();
+                        }}
+                    }}''')
+                    print(f"    ✓ Clicked answer {answer_idx} via JavaScript")
+
+                    # Cache the answer index for other locales
+                    if page_num not in quiz_cache:
+                        quiz_cache[page_num] = answer_idx
+
+                    answer_clicked = True
+                    await page.wait_for_timeout(500)
 
         if not answer_clicked:
             print("    ⚠️  Could not find answer to click")
