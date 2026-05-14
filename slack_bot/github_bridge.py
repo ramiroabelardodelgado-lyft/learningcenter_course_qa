@@ -246,6 +246,13 @@ def poll_github_pending():
             fail_issue(issue_number, "Could not parse job JSON from issue body. Expected JSON in the issue body.")
             continue
 
+        # Infer job_type from title if not in JSON (for backwards compatibility)
+        if not job.get("job_type"):
+            if title.lower().startswith("screenshot"):
+                job["job_type"] = "screenshots"
+            else:
+                job["job_type"] = "qa"
+
         # Ensure job_id exists — use timestamp for uniqueness
         if not job.get("job_id"):
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
