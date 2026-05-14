@@ -89,6 +89,34 @@ resp = chat.invoke('say ok in one word')
 print('  ✅ LLM works:', resp.content)
 " 2>/dev/null || echo "  ⚠️  LLM test failed — check AWS credentials"
 
+# ── Step 7: Install Playwright (screenshot module) ──────────────────
+echo ""
+echo "🎭 Installing Playwright for screenshots..."
+SCREENSHOT_DIR="$SCRIPT_DIR/screenshot_module"
+PACKAGES_DIR="$SCREENSHOT_DIR/.local-packages"
+BROWSERS_DIR="$SCREENSHOT_DIR/.local-browsers"
+
+mkdir -p "$PACKAGES_DIR" "$BROWSERS_DIR"
+
+if [ ! -d "$PACKAGES_DIR/playwright" ]; then
+  echo "  📦 Installing playwright package..."
+  pip install playwright --target "$PACKAGES_DIR" --upgrade --quiet
+  echo "  ✅ Playwright Python package installed"
+else
+  echo "  ✅ Playwright package already installed"
+fi
+
+if [ ! -f "$BROWSERS_DIR/.downloaded" ]; then
+  echo "  🌐 Installing Chromium browser..."
+  export PLAYWRIGHT_BROWSERS_PATH="$BROWSERS_DIR"
+  PYTHONPATH="$PACKAGES_DIR:$PYTHONPATH" python3 -m playwright install chromium --with-deps 2>/dev/null || \
+    PYTHONPATH="$PACKAGES_DIR:$PYTHONPATH" python3 -m playwright install chromium
+  touch "$BROWSERS_DIR/.downloaded"
+  echo "  ✅ Chromium browser installed"
+else
+  echo "  ✅ Chromium browser already installed"
+fi
+
 # ── Done ─────────────────────────────────────────────────────────────
 echo ""
 if [ "$PASS" = true ]; then

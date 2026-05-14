@@ -67,27 +67,30 @@ def poll_once(s3):
 
 
 def run_job(params):
-    """Run runner.py and return result dict."""
+    """Run the appropriate pipeline based on job_type."""
+    job_type = params.get("job_type", "qa")   # default preserves existing behavior
+
     try:
-        from slack_bot.runner import run
-        print(f"[poller] 🚀 Running job {params.get('job_id')}", flush=True)
-        result = run(params)
+        if job_type == "screenshots":
+            from screenshot_module.screenshot_runner import run_screenshots
+            print(f"[poller] 📸 Screenshot job: {params.get('job_id')}", flush=True)
+            result = run_screenshots(params)
+        else:
+            from slack_bot.runner import run
+            print(f"[poller] 🔍 QA job: {params.get('job_id')}", flush=True)
+            result = run(params)
         return result
+
     except Exception as e:
         traceback.print_exc()
         return {
             "job_id":           params.get("job_id", "?"),
             "course_id":        params.get("course_id", "?"),
+            "job_type":         job_type,
             "status":           "error",
             "error":            str(e),
             "slack_channel_id": params.get("slack_channel_id", ""),
             "slack_thread_ts":  params.get("slack_thread_ts", ""),
-            "course_name":      None,
-            "locales_checked":  [],
-            "summary":          {},
-            "csv_issues_s3_key": None,
-            "csv_full_s3_key":  None,
-            "duration_seconds": None,
         }
 
 

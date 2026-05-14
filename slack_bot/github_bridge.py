@@ -322,11 +322,39 @@ def poll_s3_complete():
         csv_links = []
 
         try:
+            job_type = result.get("job_type", "qa")
+
             if status == "error":
                 error_msg = result.get("error", "Unknown error")
                 fail_issue(issue_number, f"Pipeline error:\n```\n{error_msg}\n```")
                 post_slack_callback(job_id, "error", f"❌ Pipeline failed: {error_msg}", [])
+
+            elif job_type == "screenshots":
+                # ── Screenshot job: presigned ZIP link instead of CSV ──────
+                summary = build_screenshot_summary(result)
+                zip_key = result.get("s3_zip_key")
+                download_link = ""
+
+                if zip_key:
+                    try:
+                        presigned = s3.generate_presigned_url(
+                            "get_object",
+                            Params={"Bucket": S3_BUCKET, "Key": zip_key},
+                            ExpiresIn=3600,   # 1 hour
+                        )
+                        download_link = (
+                            f"\n\n📦 **[Download Screenshots ZIP]({presigned})**"
+                            f" *(link expires in 1hr)*"
+                        )
+                    except Exception as e:
+                        log(f"  ⚠️  Could not generate presigned URL: {e}")
+
+                comment_body = summary + download_link
+                complete_issue(issue_number, comment_body)
+                post_slack_callback(job_id, "complete", comment_body, [])
+
             else:
+                # ── QA job: existing behavior, unchanged ───────────────────
                 # Build summary comment (summary field may be a dict, not a string)
                 summary = result.get("summary", "")
                 if not isinstance(summary, str) or not summary:
@@ -398,6 +426,24 @@ def build_summary_from_result(result):
     footer = f"\n\n*Critical issues:* {total_critical}"
 
     return header + table + footer
+
+def build_screenshot_summary(result):
+    """Build Slack summary for a completed screenshots job."""
+    job_id   = result.get("job_id", "?")
+    course_id = result.get("course_id", "?")
+    per_locale = result.get("per_locale_counts", {})
+    total    = result.get("total_pages", 0)
+    duration = result.get("duration_seconds", 0)
+
+    lines = [f"## 📸 Screenshots Complete: `{course_id}`\n"]
+    lines.append("| Locale | Pages |")
+    lines.append("|--------|-------|")
+    for locale, count in per_locale.items():
+        status = "✅" if count > 0 else "❌"
+        lines.append(f"| {locale} | {status} {count} |")
+
+    lines.append(f"\n**Total:** {total} screenshots · {duration}s")
+    return "\n".join(lines)
 
 def upload_csvs_to_github(s3, job_id):
     """

@@ -12,3 +12,11 @@ __pycache__/
 test_migration/
 MIGRATION_COMPLETE.md
 TASK-001-*.md
+FINAL_SUMMARY.md
+PUSH_COMPLETE.md
+_claudecode_screenshot_module_context/
+_claudecode_screenshot_module_context.zip
+
+# Screenshot module dependencies (installed to EFS, not version controlled)
+screenshot_module/.local-packages/
+screenshot_module/.local-browsers/

@@ -19,6 +19,11 @@ GITHUB_REPO=ramiroabelardodelgado-lyft/lyftlearn-qa-jobs
 # ── Slack Workflow Webhook (results callback) ─────────────
 WORKATO_CALLBACK_URL=https://hooks.slack.com/triggers/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
 
+# ── Screenshot Pipeline (staging environment) ─────────────
+STAGING_BASE_URL=https://www-staging.lyft.net/learningcenter
+STAGING_PHONE=4305558360
+# NOTE: Use 10-digit format WITHOUT +1 prefix (form auto-formats it)
+
 # ── S3 (defaults — usually don't need to set) ────────────
 # S3_BUCKET=lyft-lyftlearn-production-iad
 # S3_PENDING_PREFIX=course-qa/pending/
