@@ -334,6 +334,7 @@ def poll_s3_complete():
                 summary = build_screenshot_summary(result)
                 zip_key = result.get("s3_zip_key")
                 download_link = ""
+                zip_links = []
 
                 if zip_key:
                     try:
@@ -346,12 +347,14 @@ def poll_s3_complete():
                             f"\n\n📦 **[Download Screenshots ZIP]({presigned})**"
                             f" *(link expires in 1hr)*"
                         )
+                        # Pass presigned URL to Slack callback as if it were a CSV
+                        zip_links = [("screenshots.zip", presigned)]
                     except Exception as e:
                         log(f"  ⚠️  Could not generate presigned URL: {e}")
 
                 comment_body = summary + download_link
                 complete_issue(issue_number, comment_body)
-                post_slack_callback(job_id, "complete", comment_body, [], result)
+                post_slack_callback(job_id, "complete", summary, zip_links, result)
 
             else:
                 # ── QA job: existing behavior, unchanged ───────────────────
