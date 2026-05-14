@@ -280,8 +280,14 @@ async def next_click(page) -> str:
     The Playwright script from tutorial_screenshots.py only tried
     button[aria-label="Next activity"], which caused sudden stops.
 
-    Returns: "lesson" | "next" | "last" | "done"
+    Returns: "lesson" | "next" | "last" | "done" | "error"
     """
+    # Check for error page first (avoid infinite retry loops)
+    error_text = page.locator('text=/something went wrong/i')
+    if await error_text.count() > 0:
+        print("    ⚠️  Error page detected - stopping navigation")
+        return "error"
+
     # Tier 1: lesson name tab — advances to next lesson
     lesson_tabs = page.locator('p[data-testid="lesson-name"]')
     if await lesson_tabs.count() > 0:
@@ -482,6 +488,10 @@ async def capture_locale(
 
         if action == "done":
             print(f"    [{locale}] ✅ end of tutorial ({page_num} pages)")
+            break
+
+        if action == "error":
+            print(f"    [{locale}] ❌ error page encountered, stopping ({page_num} pages)")
             break
 
         try:
