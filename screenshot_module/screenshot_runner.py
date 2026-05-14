@@ -28,6 +28,7 @@ import json
 import traceback
 import zipfile
 import uuid
+import random
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -236,12 +237,18 @@ async def handle_quiz(page, page_num: int, course_structure: dict, quiz_cache: d
     Uses cached answer index from first locale to answer consistently across locales.
     Returns True if a quiz was handled, False otherwise.
     """
-    # Detect quiz by looking for quiz UI elements
+    # Detect quiz by looking for quiz UI elements (multi-locale)
     quiz_indicators = [
         'text=/knowledge check/i',
+        'text=/prueba de conocimiento/i',  # Spanish
+        'text=/vérification des connaissances/i',  # French
+        'text=/verificação de conhecimento/i',  # Portuguese
         'text=/what is the benefit of/i',
         'text=/you had a small accident/i',
         'button:has-text("Show me the answer")',
+        'text=/muéstrame la respuesta/i',  # Spanish
+        'text=/montrez-moi la réponse/i',  # French
+        'text=/mostre-me a resposta/i',  # Portuguese
         '[role="radiogroup"]',
     ]
 
@@ -348,7 +355,9 @@ async def handle_quiz(page, page_num: int, course_structure: dict, quiz_cache: d
                         quiz_cache[page_num] = answer_idx
 
                     answer_clicked = True
-                    await page.wait_for_timeout(500)
+                    # Random delay after clicking answer
+                    delay = random.randint(600, 1200)
+                    await page.wait_for_timeout(delay)
 
         if not answer_clicked:
             print("    ⚠️  Could not find answer to click")
@@ -381,7 +390,9 @@ async def handle_quiz(page, page_num: int, course_structure: dict, quiz_cache: d
                         await btn.first.click()
                         print(f"    ✓ Clicked button: {selector}")
                         button_clicked = True
-                        await page.wait_for_timeout(1500)
+                        # Random delay after clicking submit/continue
+                        delay = random.randint(1200, 2000)
+                        await page.wait_for_timeout(delay)
                         break
                 except:
                     continue
@@ -417,10 +428,20 @@ async def next_click(page) -> str:
     Returns: "lesson" | "next" | "last" | "done" | "error"
     """
     # Check for error page first (avoid infinite retry loops)
-    error_text = page.locator('text=/something went wrong/i')
-    if await error_text.count() > 0:
-        print("    ⚠️  Error page detected - stopping navigation")
-        return "error"
+    error_indicators = [
+        'text=/something went wrong/i',
+        'text=/oops/i',
+        'text=/error occurred/i',
+        'text=/algo salió mal/i',  # Spanish
+        'text=/quelque chose s\'est mal passé/i',  # French
+        'text=/algo deu errado/i',  # Portuguese
+    ]
+
+    for indicator in error_indicators:
+        error_elem = page.locator(indicator)
+        if await error_elem.count() > 0:
+            print(f"    ⚠️  Error page detected ({indicator}) - stopping navigation")
+            return "error"
 
     # Tier 1: lesson name tab — advances to next lesson
     lesson_tabs = page.locator('p[data-testid="lesson-name"]')
@@ -614,8 +635,13 @@ async def capture_locale(
         # ── Handle quiz AFTER screenshot ──────────────────────────────
         quiz_handled = await handle_quiz(page, page_num, course_structure, quiz_cache)
         if quiz_handled:
-            # Quiz was handled, continue to next page
-            await page.wait_for_timeout(1000)
+            # Quiz was handled, add random delay before continuing
+            delay = random.randint(800, 1500)
+            await page.wait_for_timeout(delay)
+
+        # Add random delay before clicking next (avoid going too fast)
+        pre_click_delay = random.randint(500, 1000)
+        await page.wait_for_timeout(pre_click_delay)
 
         # ── Navigate to next page ─────────────────────────────────────
         action = await next_click(page)
