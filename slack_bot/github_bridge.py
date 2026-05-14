@@ -327,7 +327,7 @@ def poll_s3_complete():
             if status == "error":
                 error_msg = result.get("error", "Unknown error")
                 fail_issue(issue_number, f"Pipeline error:\n```\n{error_msg}\n```")
-                post_slack_callback(job_id, "error", f"❌ Pipeline failed: {error_msg}", [])
+                post_slack_callback(job_id, "error", f"❌ Pipeline failed: {error_msg}", [], result)
 
             elif job_type == "screenshots":
                 # ── Screenshot job: presigned ZIP link instead of CSV ──────
@@ -351,7 +351,7 @@ def poll_s3_complete():
 
                 comment_body = summary + download_link
                 complete_issue(issue_number, comment_body)
-                post_slack_callback(job_id, "complete", comment_body, [])
+                post_slack_callback(job_id, "complete", comment_body, [], result)
 
             else:
                 # ── QA job: existing behavior, unchanged ───────────────────
@@ -374,7 +374,7 @@ def poll_s3_complete():
                 complete_issue(issue_number, comment_body)
 
                 # POST to Slack webhook
-                post_slack_callback(job_id, "complete", summary, csv_links)
+                post_slack_callback(job_id, "complete", summary, csv_links, result)
 
             # Clean up: remove from S3 complete/ and active_jobs
             s3_delete(s3, key)
@@ -505,7 +505,7 @@ def upload_csvs_to_github(s3, job_id):
 # Slack Webhook Callback
 # ═══════════════════════════════════════════════════════════════════════
 
-def post_slack_callback(job_id, status, summary, csv_links):
+def post_slack_callback(job_id, status, summary, csv_links, result=None):
     """
     POST results to Slack Workflow webhook.
     Sends flat key-value pairs matching the Slack Workflow variables:
@@ -515,9 +515,15 @@ def post_slack_callback(job_id, status, summary, csv_links):
         log(f"  ℹ️  No WORKATO_CALLBACK_URL — skipping Slack callback")
         return
 
-    # Get original job params
+    # Get original job params (for GitHub-originated jobs)
     original = job_params.get(job_id, {})
     issue_number = active_jobs.get(job_id, "")
+
+    # If we have a result dict (from S3), prefer it over job_params
+    if result:
+        course_name = result.get("course_name") or result.get("course_id", "unknown")
+    else:
+        course_name = original.get("course_name", "") or original.get("course_id", "unknown")
 
     # Pick the issues CSV URL (most useful for the team)
     # Fall back to full CSV, then empty string
@@ -532,9 +538,9 @@ def post_slack_callback(job_id, status, summary, csv_links):
     # Flat payload — matches Slack Workflow webhook variables exactly
     payload = {
         "summary": summary,
-        "course_name": original.get("course_name", "") or original.get("course_id", "unknown"),
+        "course_name": course_name,
         "csv_url": csv_url,
-        "github_issue": f"https://github.com/{GITHUB_REPO}/issues/{issue_number}",
+        "github_issue": f"https://github.com/{GITHUB_REPO}/issues/{issue_number}" if issue_number else "",
         "status": status,
     }
 
