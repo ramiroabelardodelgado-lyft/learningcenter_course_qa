@@ -230,10 +230,10 @@ def fetch_course_structure(course_id: str) -> dict:
         return {"page_index": {}, "has_quizzes": False}
 
 
-async def handle_quiz(page, page_num: int, course_structure: dict) -> bool:
+async def handle_quiz(page, page_num: int, course_structure: dict, quiz_cache: dict) -> bool:
     """
     Detect if current page is a quiz and click through it.
-    Just clicks the first answer to get past the quiz.
+    Uses cached answer index from first locale to answer consistently across locales.
     Returns True if a quiz was handled, False otherwise.
     """
     # Detect quiz by looking for quiz UI elements
@@ -257,11 +257,10 @@ async def handle_quiz(page, page_num: int, course_structure: dict) -> bool:
     print("    📝 Quiz detected - clicking through...")
 
     try:
-        # Strategy: Just click the first answer option and submit
         await page.wait_for_timeout(500)
 
-        # Try to find and click the first answer option
-        answer_clicked = False
+        # Check if we have a cached answer for this page
+        cached_answer_idx = quiz_cache.get(page_num)
 
         # Try different answer selectors
         answer_selectors = [
@@ -269,14 +268,24 @@ async def handle_quiz(page, page_num: int, course_structure: dict) -> bool:
             'button[role="radio"]',
             'div[role="radio"]',
             '[data-testid^="answer"]',
-            'button:has-text("You")',  # Common answer pattern
         ]
 
+        answer_clicked = False
         for selector in answer_selectors:
             options = page.locator(selector)
-            if await options.count() > 0:
-                await options.first.click()
-                print(f"    ✓ Clicked answer using selector: {selector}")
+            count = await options.count()
+
+            if count > 0:
+                # If we have cached answer, use it; otherwise click first
+                answer_idx = cached_answer_idx if cached_answer_idx is not None and cached_answer_idx < count else 0
+
+                await options.nth(answer_idx).click()
+                print(f"    ✓ Clicked answer {answer_idx} using selector: {selector}")
+
+                # Cache the answer index for other locales
+                if page_num not in quiz_cache:
+                    quiz_cache[page_num] = answer_idx
+
                 answer_clicked = True
                 await page.wait_for_timeout(500)
                 break
@@ -288,9 +297,17 @@ async def handle_quiz(page, page_num: int, course_structure: dict) -> bool:
         # Try to find and click submit/continue button
         submit_selectors = [
             'button:has-text("Submit")',
+            'button:has-text("Enviar")',  # Spanish
+            'button:has-text("Soumettre")',  # French
+            'button:has-text("Enviar")',  # Portuguese
             'button[type="submit"]',
             'button:has-text("Continue")',
+            'button:has-text("Continuar")',
+            'button:has-text("Continuer")',
             'button:has-text("Next")',
+            'button:has-text("Siguiente")',
+            'button:has-text("Suivant")',
+            'button:has-text("Próximo")',
             'button[data-testid="core-ui-button"]',
             'svg[data-testid="core-ui-icon-arrow-right"]',
         ]
@@ -298,12 +315,16 @@ async def handle_quiz(page, page_num: int, course_structure: dict) -> bool:
         button_clicked = False
         for selector in submit_selectors:
             btn = page.locator(selector)
-            if await btn.count() > 0 and await btn.first.is_visible():
-                await btn.first.click()
-                print(f"    ✓ Clicked button: {selector}")
-                button_clicked = True
-                await page.wait_for_timeout(1500)
-                break
+            if await btn.count() > 0:
+                try:
+                    if await btn.first.is_visible():
+                        await btn.first.click()
+                        print(f"    ✓ Clicked button: {selector}")
+                        button_clicked = True
+                        await page.wait_for_timeout(1500)
+                        break
+                except:
+                    continue
 
         if not button_clicked:
             print("    ⚠️  Could not find submit/continue button")
@@ -489,6 +510,7 @@ async def capture_locale(
     captures = []
     page_num = 0
     consecutive_failures = 0
+    quiz_cache = {}  # Store answer indices to reuse across locales
 
     while True:
         page_num += 1
@@ -530,7 +552,7 @@ async def capture_locale(
                 break
 
         # ── Handle quiz AFTER screenshot ──────────────────────────────
-        quiz_handled = await handle_quiz(page, page_num, course_structure)
+        quiz_handled = await handle_quiz(page, page_num, course_structure, quiz_cache)
         if quiz_handled:
             # Quiz was handled, continue to next page
             await page.wait_for_timeout(1000)
