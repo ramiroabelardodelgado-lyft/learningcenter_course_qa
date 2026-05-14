@@ -572,18 +572,29 @@ async def _run_async(params: dict) -> dict:
 
     job_id       = _get(params, "job_id",              "JOB_ID",           str(uuid.uuid4())[:8])
     course_id    = _get(params, "course_id",           "COURSE_ID",        required=True)
-    locales_raw  = _get(params, "languages",           "LANGUAGES",        ",".join(DEFAULT_LOCALES))
+
+    # Check both "locales" (new) and "languages" (QA compat) fields
+    locales_raw = params.get("locales")
+    if locales_raw and isinstance(locales_raw, list):
+        # If locales is already a list, use it directly
+        locales = locales_raw
+    else:
+        # Otherwise try as comma-separated string (from "languages" field or env)
+        locales_raw = _get(params, "languages", "LANGUAGES", ",".join(DEFAULT_LOCALES))
+        if locales_raw.strip().lower() == "all":
+            locales = DEFAULT_LOCALES
+        else:
+            locales = [l.strip() for l in locales_raw.split(",") if l.strip()]
+
+    # Ensure we have at least one locale
+    if not locales:
+        locales = DEFAULT_LOCALES
+
     base_url     = _get(params, "staging_base_url",    "STAGING_BASE_URL", required=True)
     phone        = _get(params, "staging_phone",       "STAGING_PHONE",    required=True)
     callback_url = _get(params, "workato_callback_url","WORKATO_CALLBACK_URL", "")
     slack_channel_id = _get(params, "slack_channel_id","SLACK_CHANNEL_ID", "")
     slack_thread_ts  = _get(params, "slack_thread_ts", "SLACK_THREAD_TS",  "")
-
-    # "all" → default locale list; otherwise parse comma-separated
-    if locales_raw.strip().lower() == "all":
-        locales = DEFAULT_LOCALES
-    else:
-        locales = [l.strip() for l in locales_raw.split(",") if l.strip()]
 
     out_dir = Path.home() / "studio" / "output" / f"screenshots_{job_id}"
     out_dir.mkdir(parents=True, exist_ok=True)
