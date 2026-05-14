@@ -125,10 +125,13 @@ async def prepare_page(page) -> int:
 # Quiz handling — fetch correct answers from Contentful
 # ═══════════════════════════════════════════════════════════════════════
 
-def fetch_quiz_answers(course_id: str) -> dict:
+def fetch_course_structure(course_id: str) -> dict:
     """
-    Fetch quiz answers for a course from Contentful CMA.
-    Returns dict: {quiz_id: {question_id: correct_answer_index}}
+    Fetch course structure with quiz positions and answers.
+    Returns dict: {
+        "page_index": {page_num: {"type": "quiz", "questions": [{text, answers, correct_index}]}},
+        "has_quizzes": bool
+    }
     """
     import requests
 
@@ -137,25 +140,25 @@ def fetch_quiz_answers(course_id: str) -> dict:
     env_id = os.environ.get("CONTENTFUL_ENVIRONMENT_ID", "master")
 
     if not cma_token:
-        print("    ⚠️  No CONTENTFUL_CMA_TOKEN — cannot fetch quiz answers")
-        return {}
+        print("    ⚠️  No CONTENTFUL_CMA_TOKEN — cannot fetch course structure")
+        return {"page_index": {}, "has_quizzes": False}
 
     try:
-        # Fetch course entry
-        url = f"https://api.contentful.com/spaces/{space_id}/environments/{env_id}/entries/{course_id}"
         headers = {"Authorization": f"Bearer {cma_token}"}
-        resp = requests.get(url, headers=headers, timeout=15)
+        base = f"https://api.contentful.com/spaces/{space_id}/environments/{env_id}"
 
+        # Fetch course entry
+        resp = requests.get(f"{base}/entries/{course_id}", headers=headers, timeout=15)
         if resp.status_code != 200:
-            print(f"    ⚠️  Failed to fetch course from Contentful: {resp.status_code}")
-            return {}
+            print(f"    ⚠️  Failed to fetch course: {resp.status_code}")
+            return {"page_index": {}, "has_quizzes": False}
 
         course = resp.json()
-        quiz_answers = {}
-
-        # Extract quiz references from course structure
-        # Course → lessons → activities → quizzes
         lessons = course.get("fields", {}).get("lessons", {}).get("en-US", [])
+
+        page_index = {}
+        page_num = 1
+        has_quizzes = False
 
         for lesson_ref in lessons:
             lesson_id = lesson_ref.get("sys", {}).get("id")
@@ -163,96 +166,116 @@ def fetch_quiz_answers(course_id: str) -> dict:
                 continue
 
             # Fetch lesson
-            lesson_url = f"https://api.contentful.com/spaces/{space_id}/environments/{env_id}/entries/{lesson_id}"
-            lesson_resp = requests.get(lesson_url, headers=headers, timeout=15)
+            lesson_resp = requests.get(f"{base}/entries/{lesson_id}", headers=headers, timeout=15)
             if lesson_resp.status_code != 200:
                 continue
 
             lesson = lesson_resp.json()
-            activities = lesson.get("fields", {}).get("activities", {}).get("en-US", [])
+            lesson_type = lesson.get("sys", {}).get("contentType", {}).get("sys", {}).get("id")
 
-            for activity_ref in activities:
-                activity_id = activity_ref.get("sys", {}).get("id")
-                if not activity_id:
-                    continue
+            # Handle quiz lessons
+            if lesson_type == "quiz":
+                has_quizzes = True
+                quiz_activities = lesson.get("fields", {}).get("quizActivities", {}).get("en-US", [])
 
-                # Fetch activity to check if it's a quiz
-                activity_url = f"https://api.contentful.com/spaces/{space_id}/environments/{env_id}/entries/{activity_id}"
-                activity_resp = requests.get(activity_url, headers=headers, timeout=15)
-                if activity_resp.status_code != 200:
-                    continue
+                questions = []
+                for q_ref in quiz_activities:
+                    q_id = q_ref.get("sys", {}).get("id")
+                    if not q_id:
+                        continue
 
-                activity = activity_resp.json()
-                content_type = activity.get("sys", {}).get("contentType", {}).get("sys", {}).get("id")
+                    # Fetch question
+                    q_resp = requests.get(f"{base}/entries/{q_id}", headers=headers, timeout=15)
+                    if q_resp.status_code != 200:
+                        continue
 
-                if content_type == "quiz":
-                    # Extract quiz questions and answers
-                    questions = activity.get("fields", {}).get("questions", {}).get("en-US", [])
+                    question = q_resp.json()
+                    fields = question.get("fields", {})
 
-                    for q_ref in questions:
-                        q_id = q_ref.get("sys", {}).get("id")
-                        if not q_id:
-                            continue
+                    q_text = fields.get("displayQuestion", {}).get("en-US", "")
+                    answers = [
+                        fields.get("answer1", {}).get("en-US", ""),
+                        fields.get("answer2", {}).get("en-US", ""),
+                        fields.get("answer3", {}).get("en-US", ""),
+                        fields.get("answer4", {}).get("en-US", ""),
+                    ]
+                    # correctAnswer is 1-indexed in Contentful
+                    correct_index = fields.get("correctAnswer", {}).get("en-US", 1) - 1
 
-                        # Fetch question
-                        q_url = f"https://api.contentful.com/spaces/{space_id}/environments/{env_id}/entries/{q_id}"
-                        q_resp = requests.get(q_url, headers=headers, timeout=15)
-                        if q_resp.status_code != 200:
-                            continue
+                    questions.append({
+                        "text": q_text,
+                        "answers": [a for a in answers if a],  # Filter empty
+                        "correct_index": correct_index
+                    })
+                    page_num += 1  # Each question is a page
 
-                        question = q_resp.json()
-                        correct_answer = question.get("fields", {}).get("correctAnswer", {}).get("en-US")
+                if questions:
+                    # Quiz intro page comes before questions
+                    page_index[page_num] = {"type": "quiz_start", "questions": questions}
+                    print(f"    📝 Quiz at page ~{page_num} ({len(questions)} questions)")
+            else:
+                # Regular lesson - count activities
+                activities = lesson.get("fields", {}).get("lessonActivities", {}).get("en-US", [])
+                page_num += len(activities) if activities else 1
 
-                        if correct_answer is not None:
-                            if activity_id not in quiz_answers:
-                                quiz_answers[activity_id] = {}
-                            quiz_answers[activity_id][q_id] = correct_answer
+        if has_quizzes:
+            print(f"    ✅ Found quizzes in course structure")
 
-        if quiz_answers:
-            print(f"    ✅ Loaded quiz answers for {len(quiz_answers)} quizzes")
-
-        return quiz_answers
+        return {"page_index": page_index, "has_quizzes": has_quizzes}
 
     except Exception as e:
-        print(f"    ⚠️  Error fetching quiz answers: {e}")
-        return {}
+        print(f"    ⚠️  Error fetching course structure: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"page_index": {}, "has_quizzes": False}
 
 
-async def handle_quiz(page, quiz_answers: dict) -> bool:
+async def handle_quiz(page, page_num: int, course_structure: dict) -> bool:
     """
-    Detect if current page is a quiz and answer it.
+    Detect if current page is a quiz and answer it with the correct answer.
     Returns True if a quiz was handled, False otherwise.
     """
-    # Check if this is a quiz page
+    # Check if this page is a quiz according to course structure
+    page_info = course_structure.get("page_index", {}).get(page_num)
+    if not page_info or page_info.get("type") != "quiz_start":
+        return False
+
+    # Check if quiz UI is present
     quiz_question = page.locator('[data-testid="quiz-question"]')
     if await quiz_question.count() == 0:
         return False
 
-    print("    📝 Quiz detected - attempting to answer...")
+    print("    📝 Quiz detected - answering with correct answers...")
 
     try:
-        # Find all answer options
-        answer_options = page.locator('[data-testid^="quiz-answer-"]')
-        count = await answer_options.count()
+        questions = page_info.get("questions", [])
 
-        if count == 0:
-            print("    ⚠️  No answer options found")
-            return False
+        for idx, q_data in enumerate(questions):
+            correct_idx = q_data.get("correct_index", 0)
 
-        # Try clicking the first option (index 0) as default
-        # If we had the correct answer from Contentful, we'd use it here
-        await answer_options.first.click()
-        await page.wait_for_timeout(500)
+            # Find answer buttons - they might be radio buttons or clickable divs
+            answer_options = page.locator('[role="radio"], [data-testid^="answer-"], button:has-text("' + q_data["answers"][0] + '")')
+            count = await answer_options.count()
+
+            if count == 0:
+                print(f"    ⚠️  No answer options found for question {idx + 1}")
+                continue
+
+            # Click the correct answer
+            if correct_idx < count:
+                await answer_options.nth(correct_idx).click()
+                print(f"    ✓ Selected answer {correct_idx + 1} for question {idx + 1}")
+                await page.wait_for_timeout(500)
 
         # Click submit button
-        submit_btn = page.locator('button[data-testid="quiz-submit"], button:has-text("Submit")')
+        submit_btn = page.locator('button:has-text("Submit"), button[type="submit"]')
         if await submit_btn.count() > 0:
             await submit_btn.first.click()
-            await page.wait_for_timeout(1000)
-            print("    ✅ Quiz answer submitted")
+            await page.wait_for_timeout(1500)
+            print("    ✅ Quiz submitted")
 
-            # Click continue/next after quiz
-            continue_btn = page.locator('button:has-text("Continue"), button:has-text("Next")')
+            # Click continue/next after results
+            continue_btn = page.locator('button:has-text("Continue"), button:has-text("Next"), button[data-testid="core-ui-button"]')
             if await continue_btn.count() > 0:
                 await continue_btn.first.click()
                 await page.wait_for_timeout(1000)
@@ -261,6 +284,8 @@ async def handle_quiz(page, quiz_answers: dict) -> bool:
 
     except Exception as e:
         print(f"    ⚠️  Quiz handling error: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -406,7 +431,7 @@ async def capture_locale(
     locale: str,
     out_dir: Path,
     phone: str,
-    quiz_answers: dict = None,
+    course_structure: dict = None,
 ) -> list:
     """
     Navigate through every page of a course for one locale and save PNGs.
@@ -441,8 +466,8 @@ async def capture_locale(
         page_num += 1
 
         # ── Handle quiz if present ────────────────────────────────────
-        if quiz_answers:
-            quiz_handled = await handle_quiz(page, quiz_answers)
+        if course_structure and course_structure.get("has_quizzes"):
+            quiz_handled = await handle_quiz(page, page_num, course_structure)
             if quiz_handled:
                 await page.wait_for_timeout(1000)
 
@@ -591,9 +616,9 @@ async def _run_async(params: dict) -> dict:
     try:
         from playwright.async_api import async_playwright
 
-        # Fetch quiz answers from Contentful (once for all locales)
-        print("\n📚 Fetching quiz answers from Contentful...")
-        quiz_answers = fetch_quiz_answers(course_id)
+        # Fetch course structure with quiz positions (once for all locales)
+        print("\n📚 Fetching course structure from Contentful...")
+        course_structure = fetch_course_structure(course_id)
 
         all_captures: dict[str, list] = {}
 
@@ -619,7 +644,7 @@ async def _run_async(params: dict) -> dict:
 
                 try:
                     captures = await capture_locale(
-                        page, base_url, course_id, locale, out_dir, phone, quiz_answers
+                        page, base_url, course_id, locale, out_dir, phone, course_structure
                     )
                     all_captures[locale] = captures
                     ok_count = len([c for c in captures if c["status"] == "ok"])
