@@ -20,3 +20,6 @@ _claudecode_screenshot_module_context.zip
 # Screenshot module dependencies (installed to EFS, not version controlled)
 screenshot_module/.local-packages/
 screenshot_module/.local-browsers/
+
+# Old projects folder (contains secrets and archived code)
+Old_proyects/
