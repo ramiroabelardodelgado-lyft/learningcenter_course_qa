@@ -232,53 +232,81 @@ def fetch_course_structure(course_id: str) -> dict:
 
 async def handle_quiz(page, page_num: int, course_structure: dict) -> bool:
     """
-    Detect if current page is a quiz and answer it with the correct answer.
+    Detect if current page is a quiz and click through it.
+    Just clicks the first answer to get past the quiz.
     Returns True if a quiz was handled, False otherwise.
     """
-    # Check if this page is a quiz according to course structure
-    page_info = course_structure.get("page_index", {}).get(page_num)
-    if not page_info or page_info.get("type") != "quiz_start":
+    # Detect quiz by looking for quiz UI elements
+    quiz_indicators = [
+        'text=/knowledge check/i',
+        'text=/what is the benefit of/i',
+        'text=/you had a small accident/i',
+        'button:has-text("Show me the answer")',
+        '[role="radiogroup"]',
+    ]
+
+    is_quiz = False
+    for indicator in quiz_indicators:
+        if await page.locator(indicator).count() > 0:
+            is_quiz = True
+            break
+
+    if not is_quiz:
         return False
 
-    # Check if quiz UI is present
-    quiz_question = page.locator('[data-testid="quiz-question"]')
-    if await quiz_question.count() == 0:
-        return False
-
-    print("    📝 Quiz detected - answering with correct answers...")
+    print("    📝 Quiz detected - clicking through...")
 
     try:
-        questions = page_info.get("questions", [])
+        # Strategy: Just click the first answer option and submit
+        await page.wait_for_timeout(500)
 
-        for idx, q_data in enumerate(questions):
-            correct_idx = q_data.get("correct_index", 0)
+        # Try to find and click the first answer option
+        answer_clicked = False
 
-            # Find answer buttons - they might be radio buttons or clickable divs
-            answer_options = page.locator('[role="radio"], [data-testid^="answer-"], button:has-text("' + q_data["answers"][0] + '")')
-            count = await answer_options.count()
+        # Try different answer selectors
+        answer_selectors = [
+            '[role="radio"]',
+            'button[role="radio"]',
+            'div[role="radio"]',
+            '[data-testid^="answer"]',
+            'button:has-text("You")',  # Common answer pattern
+        ]
 
-            if count == 0:
-                print(f"    ⚠️  No answer options found for question {idx + 1}")
-                continue
-
-            # Click the correct answer
-            if correct_idx < count:
-                await answer_options.nth(correct_idx).click()
-                print(f"    ✓ Selected answer {correct_idx + 1} for question {idx + 1}")
+        for selector in answer_selectors:
+            options = page.locator(selector)
+            if await options.count() > 0:
+                await options.first.click()
+                print(f"    ✓ Clicked answer using selector: {selector}")
+                answer_clicked = True
                 await page.wait_for_timeout(500)
+                break
 
-        # Click submit button
-        submit_btn = page.locator('button:has-text("Submit"), button[type="submit"]')
-        if await submit_btn.count() > 0:
-            await submit_btn.first.click()
-            await page.wait_for_timeout(1500)
-            print("    ✅ Quiz submitted")
+        if not answer_clicked:
+            print("    ⚠️  Could not find answer to click")
+            return False
 
-            # Click continue/next after results
-            continue_btn = page.locator('button:has-text("Continue"), button:has-text("Next"), button[data-testid="core-ui-button"]')
-            if await continue_btn.count() > 0:
-                await continue_btn.first.click()
-                await page.wait_for_timeout(1000)
+        # Try to find and click submit/continue button
+        submit_selectors = [
+            'button:has-text("Submit")',
+            'button[type="submit"]',
+            'button:has-text("Continue")',
+            'button:has-text("Next")',
+            'button[data-testid="core-ui-button"]',
+            'svg[data-testid="core-ui-icon-arrow-right"]',
+        ]
+
+        button_clicked = False
+        for selector in submit_selectors:
+            btn = page.locator(selector)
+            if await btn.count() > 0 and await btn.first.is_visible():
+                await btn.first.click()
+                print(f"    ✓ Clicked button: {selector}")
+                button_clicked = True
+                await page.wait_for_timeout(1500)
+                break
+
+        if not button_clicked:
+            print("    ⚠️  Could not find submit/continue button")
 
         return True
 
@@ -465,12 +493,6 @@ async def capture_locale(
     while True:
         page_num += 1
 
-        # ── Handle quiz if present ────────────────────────────────────
-        if course_structure and course_structure.get("has_quizzes"):
-            quiz_handled = await handle_quiz(page, page_num, course_structure)
-            if quiz_handled:
-                await page.wait_for_timeout(1000)
-
         # ── Apply Tampermonkey fixes ──────────────────────────────────
         video_wait_ms = await prepare_page(page)
         if video_wait_ms > 0:
@@ -506,6 +528,12 @@ async def capture_locale(
             if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                 print(f"    [{locale}] {MAX_CONSECUTIVE_FAILURES} consecutive failures — stopping")
                 break
+
+        # ── Handle quiz AFTER screenshot ──────────────────────────────
+        quiz_handled = await handle_quiz(page, page_num, course_structure)
+        if quiz_handled:
+            # Quiz was handled, continue to next page
+            await page.wait_for_timeout(1000)
 
         # ── Navigate to next page ─────────────────────────────────────
         action = await next_click(page)
