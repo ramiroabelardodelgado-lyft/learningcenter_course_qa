@@ -126,6 +126,27 @@ async def prepare_page(page) -> int:
 # Quiz handling — fetch correct answers from Contentful
 # ═══════════════════════════════════════════════════════════════════════
 
+def fetch_course_name(course_id: str) -> str:
+    """Fetch course title from Contentful. Returns course_id as fallback."""
+    import requests
+    space_id  = os.environ.get("CONTENTFUL_SPACE_ID", "kdr36sxfa9m3")
+    cma_token = os.environ.get("CONTENTFUL_CMA_TOKEN")
+    env_id    = os.environ.get("CONTENTFUL_ENVIRONMENT_ID", "master")
+    if not cma_token:
+        return course_id
+    try:
+        headers = {"Authorization": f"Bearer {cma_token}"}
+        resp = requests.get(
+            f"https://api.contentful.com/spaces/{space_id}/environments/{env_id}/entries/{course_id}",
+            headers=headers, timeout=15
+        )
+        if resp.status_code == 200:
+            return resp.json().get("fields", {}).get("title", {}).get("en-US", course_id)
+    except Exception:
+        pass
+    return course_id
+
+
 def fetch_course_structure(course_id: str) -> dict:
     """
     Fetch course structure with quiz positions and answers.
@@ -729,7 +750,7 @@ def _post_slack_screenshot(webhook_url: str, callback: dict, github_issue_url: s
 
     status = callback.get("status", "error")
     payload = {
-        "course_name":  callback.get("course_id", "Unknown"),
+        "course_name":  callback.get("course_name") or callback.get("course_id", "Unknown"),
         "status":       "✅ success" if status == "success" else "❌ failed",
         "zip_url":      zip_url,
         "github_issue": github_issue_url,
@@ -826,6 +847,7 @@ async def _run_async(params: dict) -> dict:
         "job_id":           job_id,
         "job_type":         "screenshots",
         "course_id":        course_id,
+        "course_name":      None,
         "status":           "error",
         "locales":          locales,
         "total_pages":      0,
@@ -848,8 +870,11 @@ async def _run_async(params: dict) -> dict:
     try:
         from playwright.async_api import async_playwright
 
-        # Fetch course structure with quiz positions (once for all locales)
+        # Fetch course name and structure from Contentful
         print("\n📚 Fetching course structure from Contentful...")
+        course_name = fetch_course_name(course_id)
+        callback["course_name"] = course_name
+        print(f"  Course name: {course_name}")
         course_structure = fetch_course_structure(course_id)
 
         all_captures: dict[str, list] = {}
