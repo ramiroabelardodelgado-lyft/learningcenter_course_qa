@@ -107,6 +107,9 @@ else
 fi
 
 if [ ! -f "$BROWSERS_DIR/.downloaded" ]; then
+  echo "  🌐 Installing Chromium system dependencies..."
+  sudo PYTHONPATH="$PACKAGES_DIR:$PYTHONPATH" python3 -m playwright install-deps chromium
+  sudo ldconfig
   echo "  🌐 Installing Chromium browser..."
   export PLAYWRIGHT_BROWSERS_PATH="$BROWSERS_DIR"
   PYTHONPATH="$PACKAGES_DIR:$PYTHONPATH" python3 -m playwright install chromium --with-deps 2>/dev/null || \
