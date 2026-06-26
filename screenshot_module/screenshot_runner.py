@@ -951,7 +951,6 @@ async def _run_async(params: dict) -> dict:
         )
         callback["duration_seconds"] = duration
         print(f"\n⏱️  Duration: {duration}s")
-        _post_callback(callback_url, callback)
         _post_slack_screenshot(slack_screenshot_url, callback)
 
     return callback
