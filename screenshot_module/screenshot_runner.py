@@ -813,7 +813,7 @@ async def _run_async(params: dict) -> dict:
     _load_env()
 
     job_id       = _get(params, "job_id",              "JOB_ID",           str(uuid.uuid4())[:8])
-    course_id    = _get(params, "course_id",           "COURSE_ID",        required=True)
+    course_id    = _get(params, "course_id",           "COURSE_ID",        required=True).strip()
 
     # Check both "locales" (new) and "languages" (QA compat) fields
     locales_raw = params.get("locales")
