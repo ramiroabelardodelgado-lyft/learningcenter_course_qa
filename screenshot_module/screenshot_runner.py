@@ -141,7 +141,9 @@ def fetch_course_name(course_id: str) -> str:
             headers=headers, timeout=15
         )
         if resp.status_code == 200:
-            return resp.json().get("fields", {}).get("title", {}).get("en-US", course_id)
+            fields = resp.json().get("fields", {})
+            name = fields.get("displayName") or fields.get("internalName") or {}
+            return name.get("en-US", course_id)
     except Exception:
         pass
     return course_id
