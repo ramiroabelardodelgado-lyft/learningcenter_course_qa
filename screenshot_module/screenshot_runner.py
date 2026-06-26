@@ -705,6 +705,50 @@ async def capture_locale(
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# Slack notification
+# ═══════════════════════════════════════════════════════════════════════
+
+def _post_slack_screenshot(webhook_url: str, callback: dict, github_issue_url: str = ""):
+    """Post screenshot job result directly to Slack webhook. Best-effort — never raises."""
+    if not webhook_url:
+        return
+    import urllib.request
+
+    s3_key = callback.get("s3_zip_key")
+    zip_url = ""
+    if s3_key:
+        try:
+            s3 = boto3.client("s3")
+            zip_url = s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": os.environ.get("S3_BUCKET", "lyft-lyftlearn-production-iad"), "Key": s3_key},
+                ExpiresIn=604800,  # 7 days
+            )
+        except Exception:
+            zip_url = f"s3://lyft-lyftlearn-production-iad/{s3_key}"
+
+    status = callback.get("status", "error")
+    payload = {
+        "course_name":  callback.get("course_id", "Unknown"),
+        "status":       "✅ success" if status == "success" else "❌ failed",
+        "zip_url":      zip_url,
+        "github_issue": github_issue_url,
+    }
+
+    try:
+        req = urllib.request.Request(
+            webhook_url,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            print(f"✅ Slack notification sent — HTTP {r.status}")
+    except Exception as e:
+        print(f"⚠️  Slack notification failed (non-fatal): {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # ZIP + S3 upload
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -768,8 +812,9 @@ async def _run_async(params: dict) -> dict:
 
     base_url     = _get(params, "staging_base_url",    "STAGING_BASE_URL", required=True)
     phone        = _get(params, "staging_phone",       "STAGING_PHONE",    required=True)
-    callback_url = _get(params, "workato_callback_url","WORKATO_CALLBACK_URL", "")
-    slack_channel_id = _get(params, "slack_channel_id","SLACK_CHANNEL_ID", "")
+    callback_url         = _get(params, "workato_callback_url",       "WORKATO_CALLBACK_URL",        "")
+    slack_screenshot_url = _get(params, "slack_screenshot_webhook",   "SLACK_SCREENSHOT_WEBHOOK",    "")
+    slack_channel_id     = _get(params, "slack_channel_id",           "SLACK_CHANNEL_ID",            "")
     slack_thread_ts  = _get(params, "slack_thread_ts", "SLACK_THREAD_TS",  "")
 
     out_dir = Path.home() / "studio" / "output" / f"screenshots_{job_id}"
@@ -879,6 +924,7 @@ async def _run_async(params: dict) -> dict:
         callback["duration_seconds"] = duration
         print(f"\n⏱️  Duration: {duration}s")
         _post_callback(callback_url, callback)
+        _post_slack_screenshot(slack_screenshot_url, callback)
 
     return callback
 

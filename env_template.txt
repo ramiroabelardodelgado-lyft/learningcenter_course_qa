@@ -19,6 +19,9 @@ GITHUB_REPO=ramiroabelardodelgado-lyft/lyftlearn-qa-jobs
 # ── Slack Workflow Webhook (results callback) ─────────────
 WORKATO_CALLBACK_URL=https://hooks.slack.com/triggers/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
 
+# ── Slack Screenshot Webhook (direct notification on job complete) ────
+SLACK_SCREENSHOT_WEBHOOK=https://hooks.slack.com/triggers/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
+
 # ── Screenshot Pipeline (staging environment) ─────────────
 STAGING_BASE_URL=https://www-staging.lyft.net/learningcenter
 STAGING_PHONE=4305558360
