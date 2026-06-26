@@ -739,7 +739,7 @@ def _post_slack_screenshot(webhook_url: str, callback: dict, github_issue_url: s
     zip_url = ""
     if s3_key:
         try:
-            s3 = boto3.client("s3")
+            s3 = boto3.client("s3", region_name="us-east-1")
             zip_url = s3.generate_presigned_url(
                 "get_object",
                 Params={"Bucket": os.environ.get("S3_BUCKET", "lyft-lyftlearn-production-iad"), "Key": s3_key},
@@ -773,14 +773,15 @@ def _post_slack_screenshot(webhook_url: str, callback: dict, github_issue_url: s
 # ZIP + S3 upload
 # ═══════════════════════════════════════════════════════════════════════
 
-def zip_and_upload(out_dir: Path, job_id: str) -> str:
+def zip_and_upload(out_dir: Path, job_id: str, course_name: str = "") -> str:
     """
     Zip all PNGs under out_dir and upload to S3.
     Returns the S3 key of the uploaded zip.
     """
     import boto3
 
-    zip_path = out_dir.parent / f"{job_id}_screenshots.zip"
+    safe_name = course_name.replace(" ", "_").replace("/", "-") if course_name else job_id
+    zip_path = out_dir.parent / f"{safe_name}_screenshots.zip"
     png_files = sorted(out_dir.rglob("*.png"))
 
     print(f"\n  📦 Zipping {len(png_files)} screenshots...")
@@ -791,7 +792,7 @@ def zip_and_upload(out_dir: Path, job_id: str) -> str:
             zf.write(png, arc_name)
 
     bucket = os.environ.get("S3_BUCKET", "lyft-lyftlearn-production-iad")
-    s3_key = f"course-qa/screenshots/{job_id}_screenshots.zip"
+    s3_key = f"course-qa/screenshots/{safe_name}_screenshots.zip"
 
     boto3.client("s3").upload_file(str(zip_path), bucket, s3_key)
     size_mb = zip_path.stat().st_size / (1024 * 1024)
@@ -916,7 +917,7 @@ async def _run_async(params: dict) -> dict:
             await browser.close()
 
         # Zip and upload
-        s3_key = zip_and_upload(out_dir, job_id)
+        s3_key = zip_and_upload(out_dir, job_id, callback.get("course_name", ""))
 
         per_locale_counts = {
             loc: len([c for c in caps if c.get("status") == "ok"])
