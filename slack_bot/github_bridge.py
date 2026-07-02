@@ -348,7 +348,7 @@ def poll_s3_complete():
                         presigned = s3.generate_presigned_url(
                             "get_object",
                             Params={"Bucket": S3_BUCKET, "Key": zip_key},
-                            ExpiresIn=3600,   # 1 hour
+                            ExpiresIn=86400,  # 24 hours
                         )
                         download_link = (
                             f"\n\n📦 **[Download Screenshots ZIP]({presigned})**"
@@ -361,7 +361,7 @@ def poll_s3_complete():
 
                 comment_body = summary + download_link
                 complete_issue(issue_number, comment_body)
-                post_slack_callback(job_id, "complete", summary, zip_links, result)
+                # screenshot runner posts directly to its own Slack webhook — skip old callback
 
             else:
                 # ── QA job: existing behavior, unchanged ───────────────────

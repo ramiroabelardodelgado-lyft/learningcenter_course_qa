@@ -67,8 +67,8 @@ python3 language_qa.py --input ./output/De-escalation/ --skip-en --csv --save
 
 ```bash
 cd $HOME/studio
-nohup python3 slack_bot/poller.py > poller.log 2>&1 &
-nohup python3 slack_bot/github_bridge.py > github_bridge.log 2>&1 &
+bash start_services.sh   # start both pollers
+bash stop_services.sh    # stop both pollers
 ```
 
 ## First-Time: Store .env in S3
@@ -89,5 +89,7 @@ Future instances pull it automatically via `bootstrap.sh`.
 | 8 | ~ doesn't expand in double quotes | Use $HOME in bash, Path.home() in Python |
 | 9 | PYTHONPATH not set in non-interactive SSH | ✅ Resolved — LyftLearn Agent image has system-level packages. No `persistent-packages/` or `activate.sh` needed. |
 | 10 | Course ID typos | Case-sensitive. 2yQq04tUUk1H67xlZA7PLn (double-U) |
+| 11 | Chromium fails with `libglib-2.0.so.0: cannot open shared object file` | System deps don't persist across instance restarts. `start_services.sh` reinstalls them automatically. If running manually: `sudo PYTHONPATH=screenshot_module/.local-packages python3 -m playwright install-deps chromium && sudo ldconfig` |
+| 12 | Course ID with leading/trailing whitespace causes malformed URLs | `screenshot_runner.py` strips whitespace automatically — clean the ID before submitting if submitting manually |
 
 Full list: see roadblocks.md in project docs.
