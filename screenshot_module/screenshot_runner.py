@@ -112,14 +112,54 @@ VIDEO_PREP_JS = """
 """
 
 
-async def prepare_page(page) -> int:
+FULL_HEIGHT_JS = """
+() => {
+    // Remove overflow/height restrictions on common scroll containers
+    // so the full content is measurable
+    try {
+        const selectors = [
+            '[data-testid="simple-text-wrapper"]',
+            '[data-testid="lesson-content"]',
+            '.lesson-content',
+            'main',
+            '#root',
+        ];
+        selectors.forEach(sel => {
+            const el = document.querySelector(sel);
+            if (el) {
+                el.style.overflow = 'visible';
+                el.style.height = 'auto';
+                el.style.maxHeight = 'none';
+                if (el.parentElement) {
+                    el.parentElement.style.overflow = 'visible';
+                    el.parentElement.style.height = 'auto';
+                    el.parentElement.style.maxHeight = 'none';
+                }
+            }
+        });
+        document.body.style.overflow = 'visible';
+        document.documentElement.style.overflow = 'visible';
+    } catch(e) {}
+    return Math.max(
+        document.body.scrollHeight,
+        document.documentElement.scrollHeight,
+        document.body.offsetHeight,
+        document.documentElement.offsetHeight
+    );
+}
+"""
+
+
+async def prepare_page(page) -> tuple:
     """
-    Apply Tampermonkey fixes to the current page before screenshotting.
-    Returns video_wait_ms (0 if no video on page).
+    Apply Tampermonkey fixes and measure full content height.
+    Returns (video_wait_ms, full_height) where full_height >= VIEWPORT height.
     """
     await page.evaluate(RESIZE_JS)
     video_wait_ms = await page.evaluate(VIDEO_PREP_JS)
-    return min(int(video_wait_ms), MAX_VIDEO_WAIT_MS)
+    full_height = await page.evaluate(FULL_HEIGHT_JS)
+    full_height = max(int(full_height), VIEWPORT["height"])
+    return min(int(video_wait_ms), MAX_VIDEO_WAIT_MS), full_height
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -649,22 +689,25 @@ async def capture_locale(
     while True:
         page_num += 1
 
-        # ── Apply Tampermonkey fixes ──────────────────────────────────
-        video_wait_ms = await prepare_page(page)
+        # ── Apply Tampermonkey fixes + measure full content height ───────
+        video_wait_ms, full_height = await prepare_page(page)
         if video_wait_ms > 0:
             print(f"    [{locale}] page {page_num:03d} — video, waiting {video_wait_ms}ms...")
             await page.wait_for_timeout(video_wait_ms)
         else:
             await page.wait_for_timeout(PAGE_SETTLE_MS)
 
-        # ── Screenshot ────────────────────────────────────────────────
+        # ── Expand viewport to fit full content, screenshot, restore ──
         filename = locale_folder / f"{page_num:03d}.png"
         try:
+            if full_height > VIEWPORT["height"]:
+                await page.set_viewport_size({"width": VIEWPORT["width"], "height": full_height})
             await page.screenshot(
                 path=str(filename),
-                full_page=False,          # viewport only — matches TM htmlToImage behavior
+                full_page=False,
                 animations="disabled",
             )
+            await page.set_viewport_size(VIEWPORT)  # restore for navigation
             captures.append({
                 "page_num": page_num,
                 "path": str(filename),
